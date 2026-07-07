@@ -13,8 +13,14 @@ $flow = new FlowService($apiKey, $secretKey, $isSandbox);
 // Obtener la acción del query param
 $action = $_GET['action'] ?? 'home';
 
-// Determinar el protocolo y host para generar URLs absolutas
-$protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+// Determinar el protocolo y host para generar URLs absolutas (soporta SSL en proxies de Render/Cloudflare)
+$protocol = 'http';
+if (
+    (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ||
+    (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https')
+) {
+    $protocol = 'https';
+}
 $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
 $currentUrl = "$protocol://$host" . explode('?', $_SERVER['REQUEST_URI'])[0];
 
@@ -24,21 +30,24 @@ $currentUrl = "$protocol://$host" . explode('?', $_SERVER['REQUEST_URI'])[0];
 
 // ACCIÓN: Iniciar el pago
 if ($action === 'pay') {
-    $amount = filter_input(INPUT_POST, 'amount', FILTER_VALIDATE_INT) ?: 1000;
-    $email = filter_input(INPUT_POST, 'email', FILTER_VALIDATE_EMAIL) ?: 'cliente@prueba.com';
-    $currency = filter_input(INPUT_POST, 'currency', FILTER_DEFAULT) ?: 'CLP';
-
-    $paymentData = [
-        'commerceOrder' => 'ORDER-' . time(),
-        'subject' => 'Pago de Prueba RAPI GOD',
-        'amount' => $amount,
-        'email' => $email,
-        'urlConfirmation' => $currentUrl . '?action=confirm',
-        'urlReturn' => $currentUrl . '?action=return',
-        'currency' => $currency
-    ];
-
     try {
+        $amount = filter_input(INPUT_POST, 'amount', FILTER_VALIDATE_INT);
+        if (!$amount || $amount <= 0) {
+            throw new Exception("El monto del pago es obligatorio y debe ser un número entero mayor que cero.");
+        }
+        $email = filter_input(INPUT_POST, 'email', FILTER_VALIDATE_EMAIL) ?: 'cliente@prueba.com';
+        $currency = filter_input(INPUT_POST, 'currency', FILTER_DEFAULT) ?: 'PEN';
+
+        $paymentData = [
+            'commerceOrder' => 'ORDER-' . time(),
+            'subject' => 'Pago de Prueba',
+            'amount' => $amount,
+            'email' => $email,
+            'urlConfirmation' => $currentUrl . '?action=confirm',
+            'urlReturn' => $currentUrl . '?action=return',
+            'currency' => $currency
+        ];
+
         $result = $flow->createPayment($paymentData);
         // Redirigir al cliente al checkout de Flow
         header('Location: ' . $result['url'] . '?token=' . $result['token']);
@@ -86,7 +95,7 @@ if ($action === 'confirm') {
 // ACCIÓN: Retorno del cliente (Pantalla de Éxito o Fallo)
 $paymentResult = null;
 if ($action === 'return') {
-    $token = $_GET['token'] ?? null;
+    $token = $_POST['token'] ?? $_GET['token'] ?? null;
     if ($token) {
         try {
             $paymentResult = $flow->getPaymentStatus($token);
@@ -101,7 +110,7 @@ if ($action === 'return') {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pasarela Flow - RAPI GOD</title>
+    <title>Pasarela Flow</title>
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -365,8 +374,14 @@ if ($action === 'return') {
             <?php echo $isSandbox ? 'Ambiente Sandbox (Pruebas)' : 'Ambiente Producción'; ?>
         </span>
 
+        <?php if (!$isSandbox): ?>
+            <div style="background: rgba(239, 68, 68, 0.15); border: 1px solid var(--danger); color: #f87171; padding: 14px; border-radius: 12px; font-size: 0.9rem; margin-top: 15px; margin-bottom: 5px; text-align: center; line-height: 1.4;">
+                <strong>⚠️ ATENCIÓN:</strong> Estás en modo de <strong>PRODUCCIÓN</strong>. Los pagos iniciados aquí serán reales y cobrarán dinero verdadero.
+            </div>
+        <?php endif; ?>
+
         <h1>Pasarela Flow</h1>
-        <p class="subtitle">Simulación y pruebas de cobro - RAPI GOD</p>
+        <p class="subtitle">Simulación y pruebas de cobro</p>
 
         <?php if (isset($error)): ?>
             <div class="error-box">
@@ -382,22 +397,22 @@ if ($action === 'return') {
 
         <form action="?action=pay" method="POST">
             <div class="form-group">
-                <label for="amount">Monto del Pago</label>
-                <input type="number" id="amount" name="amount" value="1500" required min="1">
+                <label for="amount">Monto del Pago (en céntimos para PEN/USD)</label>
+                <input type="number" id="amount" name="amount" required min="1">
             </div>
 
             <div class="form-group">
                 <label for="currency">Moneda</label>
                 <select id="currency" name="currency">
+                    <option value="PEN" selected>PEN (Soles Peruanos)</option>
                     <option value="CLP">CLP (Pesos Chilenos)</option>
-                    <option value="PEN">PEN (Soles Peruanos)</option>
                     <option value="USD">USD (Dólares)</option>
                 </select>
             </div>
 
             <div class="form-group">
                 <label for="email">Correo del Comprador</label>
-                <input type="email" id="email" name="email" value="cliente_prueba@flow.cl" required>
+                <input type="email" id="email" name="email" required>
             </div>
 
             <button type="submit" class="btn">Pagar con Flow</button>
