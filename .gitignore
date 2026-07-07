@@ -1,0 +1,11 @@
+# Ignorar variables de entorno con credenciales secretas
+.env
+.env.local
+
+# Ignorar logs de pagos generados localmente
+payments.log
+
+# Ignorar carpetas comunes de desarrollo
+.vscode/
+.idea/
+.DS_Store
